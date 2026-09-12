@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sales Performance &amp; KPI Analytics</title>
+<script src="chart.umd.js"></script>
+<style>
+  :root{
+    --bg:#0f1720; --panel:#161f2c; --panel-border:#232f3f;
+    --text:#e7ecf2; --muted:#8ea0b5; --accent:#3fd0c9; --accent-2:#f2a65a;
+    --neg:#e2694b; --grid:#22303f;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text);
+       font-family: "Iowan Old Style","Georgia",serif;}
+  .topbar{padding:28px 40px 18px; border-bottom:1px solid var(--panel-border);}
+  .topbar h1{margin:0 0 4px; font-size:26px; font-weight:600; letter-spacing:.2px;}
+  .topbar p{margin:0; color:var(--muted); font-family: -apple-system, "Segoe UI", sans-serif; font-size:14px;}
+  .wrap{max-width:1240px; margin:0 auto; padding:28px 40px 60px;}
+  .kpi-row{display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:28px;}
+  .kpi{background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:18px 20px;}
+  .kpi .label{color:var(--muted); font-family:-apple-system,"Segoe UI",sans-serif; font-size:12.5px; margin-bottom:8px;}
+  .kpi .value{font-size:28px; font-variant-numeric:tabular-nums; font-weight:600;}
+  .kpi .value.accent{color:var(--accent);}
+  .kpi .sub{font-family:-apple-system,"Segoe UI",sans-serif; font-size:12.5px; color:var(--muted); margin-top:6px;}
+  .grid2{display:grid; grid-template-columns:1.4fr 1fr; gap:18px; margin-bottom:18px;}
+  .panel{background:var(--panel); border:1px solid var(--panel-border); border-radius:6px; padding:20px;}
+  .panel h2{margin:0 0 14px; font-size:15px; font-weight:600; color:var(--text);}
+  table{width:100%; border-collapse:collapse; font-family:-apple-system,"Segoe UI",sans-serif; font-size:13px;}
+  th{text-align:left; color:var(--muted); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--panel-border);}
+  td{padding:6px 8px; border-bottom:1px solid #1c2734; font-variant-numeric:tabular-nums;}
+  tr:last-child td{border-bottom:none;}
+  .num{text-align:right;}
+  .pos{color:var(--accent);} .neg{color:var(--neg);}
+  canvas{max-height:260px;}
+  footer{text-align:center; color:var(--muted); font-family:-apple-system,"Segoe UI",sans-serif; font-size:12px; padding:20px;}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>Sales Performance &amp; KPI Analytics</h1>
+    <p>E-commerce sales warehouse — star schema (fact_sales + dim_customer / dim_product / dim_date)</p>
+  </div>
+  <div class="wrap">
+    <div class="kpi-row" id="kpi-row"></div>
+    <div class="grid2">
+      <div class="panel"><h2>Monthly Revenue Trend</h2><canvas id="trendChart"></canvas></div>
+      <div class="panel"><h2>Channel Performance</h2><canvas id="channelChart"></canvas></div>
+    </div>
+    <div class="grid2">
+      <div class="panel">
+        <h2>Top 10 Products by Revenue</h2>
+        <table><thead><tr><th>Product</th><th>Category</th><th class="num">Revenue</th><th class="num">Margin</th></tr></thead>
+        <tbody id="topProductsBody"></tbody></table>
+      </div>
+      <div class="panel">
+        <h2>Order Status Funnel</h2>
+        <canvas id="statusChart"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Revenue by Customer Segment &amp; Region</h2>
+      <table>
+        <thead><tr><th>Segment</th><th>Region</th><th class="num">Customers</th><th class="num">Orders</th>
+        <th class="num">Revenue</th><th class="num">AOV</th><th class="num">Rev / Customer</th></tr></thead>
+        <tbody id="segmentBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <footer>Generated from scripts/build_and_query.py — data refreshes by re-running the pipeline.</footer>
+
+<script>
+const DATA = __KPI_DATA__;
+
+const fmt = n => n==null ? "-" : Number(n).toLocaleString(undefined,{maximumFractionDigits:0});
+const fmtMoney = n => n==null ? "-" : "$" + fmt(n);
+const fmtPct = n => n==null ? "-" : (n>0?"+":"") + Number(n).toFixed(1) + "%";
+
+Chart.defaults.color = "#8ea0b5";
+Chart.defaults.borderColor = "#22303f";
+Chart.defaults.font.family = "-apple-system, 'Segoe UI', sans-serif";
+
+// ---- top KPI cards ----
+const trend = DATA.kpi_monthly_trend;
+const totalRevenue = trend.reduce((s,r)=>s+r.revenue,0);
+const totalOrders = trend.reduce((s,r)=>s+r.orders,0);
+const totalMargin = trend.reduce((s,r)=>s+r.margin,0);
+const lastGrowth = trend[trend.length-1]?.revenue_mom_growth_pct;
+
+const kpiRow = document.getElementById("kpi-row");
+const cards = [
+  ["Total Revenue", fmtMoney(totalRevenue), null],
+  ["Total Orders", fmt(totalOrders), null],
+  ["Gross Margin", fmtMoney(totalMargin) + "  (" + ((totalMargin/totalRevenue)*100).toFixed(1) + "%)", null],
+  ["Latest MoM Growth", fmtPct(lastGrowth), lastGrowth>=0?"pos":"neg"],
+];
+cards.forEach(([label,val,cls])=>{
+  const div = document.createElement("div");
+  div.className = "kpi";
+  div.innerHTML = `<div class="label">${label}</div><div class="value ${cls?cls:'accent'}">${val}</div>`;
+  kpiRow.appendChild(div);
+});
+
+// ---- monthly trend chart ----
+new Chart(document.getElementById("trendChart"), {
+  type: "line",
+  data: {
+    labels: trend.map(r=>r.month_name.slice(0,3)+" "+r.year),
+    datasets: [{
+      label:"Revenue", data: trend.map(r=>r.revenue),
+      borderColor:"#3fd0c9", backgroundColor:"rgba(63,208,201,0.12)", fill:true, tension:.3, pointRadius:2
+    }]
+  },
+  options:{ plugins:{legend:{display:false}}, scales:{ y:{ grid:{color:"#22303f"} }, x:{ grid:{display:false} } } }
+});
+
+// ---- channel chart ----
+const ch = DATA.kpi_channel_performance;
+new Chart(document.getElementById("channelChart"), {
+  type: "bar",
+  data: { labels: ch.map(r=>r.channel), datasets:[{ label:"Revenue", data: ch.map(r=>r.revenue),
+    backgroundColor:["#3fd0c9","#f2a65a","#7c9cff"] }] },
+  options:{ plugins:{legend:{display:false}}, scales:{ y:{grid:{color:"#22303f"}}, x:{grid:{display:false}} } }
+});
+
+// ---- status funnel chart ----
+const st = DATA.kpi_order_status_funnel;
+new Chart(document.getElementById("statusChart"), {
+  type: "doughnut",
+  data: { labels: st.map(r=>r.status), datasets:[{ data: st.map(r=>r.orders),
+    backgroundColor:["#3fd0c9","#f2a65a","#7c9cff","#e2694b"] }] },
+  options:{ plugins:{legend:{position:"right", labels:{boxWidth:12}}} }
+});
+
+// ---- top products table ----
+const tp = DATA.kpi_top_products.slice(0,10);
+document.getElementById("topProductsBody").innerHTML = tp.map(r=>`
+  <tr><td>${r.product_name}</td><td>${r.category}</td>
+  <td class="num">${fmtMoney(r.revenue)}</td><td class="num">${fmtMoney(r.margin)}</td></tr>
+`).join("");
+
+// ---- segment table ----
+const seg = DATA.kpi_customer_segments.sort((a,b)=>b.revenue-a.revenue);
+document.getElementById("segmentBody").innerHTML = seg.map(r=>`
+  <tr><td>${r.segment}</td><td>${r.region}</td><td class="num">${fmt(r.customers)}</td>
+  <td class="num">${fmt(r.orders)}</td><td class="num">${fmtMoney(r.revenue)}</td>
+  <td class="num">${fmtMoney(r.avg_order_value)}</td><td class="num">${fmtMoney(r.revenue_per_customer)}</td></tr>
+`).join("");
+</script>
+</body>
+</html>

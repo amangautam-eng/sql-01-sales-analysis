@@ -1,0 +1,4 @@
+channel,orders,revenue,avg_order_value,margin_pct
+Marketplace,1485,3152288.54,2122.75,45.81
+Mobile App,1517,3311906.43,2183.19,45.73
+Web,1526,3235261.09,2120.09,45.72
